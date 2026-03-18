@@ -79,7 +79,50 @@ def overlay_heatmap_on_image(heatmap, image, alpha=0.5):
         except:
             heatmap = np.array(heatmap)
 
+    heatmap = np.asarray(heatmap)
     heatmap = np.squeeze(heatmap)
+
+    # Normalize/reshape heatmap into (H, W)
+    if heatmap.ndim == 0:
+        heatmap = heatmap.reshape(1, 1)
+    elif heatmap.ndim == 1:
+        # Prefer reshaping to the image size if it matches exactly
+        if isinstance(image, Image.Image):
+            w, h = image.size
+            if heatmap.size == h * w:
+                heatmap = heatmap.reshape(h, w)
+            else:
+                side = int(round(np.sqrt(heatmap.size)))
+                if side * side == heatmap.size:
+                    heatmap = heatmap.reshape(side, side)
+                else:
+                    raise ValueError(
+                        f"Heatmap is 1D with length {heatmap.size}, cannot reshape "
+                        f"to image size ({h}x{w})."
+                    )
+        else:
+            side = int(round(np.sqrt(heatmap.size)))
+            if side * side == heatmap.size:
+                heatmap = heatmap.reshape(side, side)
+            else:
+                raise ValueError(
+                    f"Heatmap is 1D with length {heatmap.size}, and no PIL image "
+                    "was provided to infer (H, W)."
+                )
+    elif heatmap.ndim != 2:
+        raise ValueError(f"Expected heatmap with 2 dims (H, W), got shape {heatmap.shape}.")
+
+    # clamp/normalize to [0, 1] for colormap stability
+    heatmap = heatmap.astype(np.float32, copy=False)
+    if np.isfinite(heatmap).any():
+        hmin = np.nanmin(heatmap)
+        hmax = np.nanmax(heatmap)
+        if hmax > hmin:
+            heatmap = (heatmap - hmin) / (hmax - hmin)
+        else:
+            heatmap = np.zeros_like(heatmap, dtype=np.float32)
+    else:
+        heatmap = np.zeros_like(heatmap, dtype=np.float32)
 
     # apply color map
     heatmap_color = cm.jet(heatmap)
@@ -88,10 +131,22 @@ def overlay_heatmap_on_image(heatmap, image, alpha=0.5):
     heatmap_color = np.array(heatmap_color)
 
     # keep RGB only
+    if heatmap_color.ndim != 3 or heatmap_color.shape[2] < 3:
+        raise ValueError(f"Unexpected colormap output shape: {heatmap_color.shape}")
     heatmap_color = heatmap_color[:, :, :3]
 
     # convert original image
-    image = np.array(image) / 255.0
+    if isinstance(image, Image.Image):
+        image = image.convert("RGB")
+        image = np.asarray(image, dtype=np.float32) / 255.0
+    else:
+        image = np.asarray(image, dtype=np.float32)
+        if image.max() > 1.0:
+            image = image / 255.0
+        if image.ndim == 2:
+            image = np.stack([image, image, image], axis=-1)
+        elif image.ndim == 3 and image.shape[2] == 4:
+            image = image[:, :, :3]
 
     # resize heatmap if needed
     if heatmap_color.shape[:2] != image.shape[:2]:
@@ -104,4 +159,4 @@ def overlay_heatmap_on_image(heatmap, image, alpha=0.5):
     overlay = alpha * heatmap_color + (1 - alpha) * image
     overlay = np.clip(overlay, 0, 1)
 
-    return overlay
+    return Image.fromarray((overlay * 255).astype(np.uint8))

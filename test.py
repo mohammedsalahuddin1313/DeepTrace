@@ -128,7 +128,7 @@ def main():
 
     test_loader = get_test_loader()
     evaluate(model, test_loader, device)
-    # gradcam_demo(model, device, num_samples=4)
+    gradcam_demo(model, device, num_samples=4)
 
 
 if __name__ == "__main__":
